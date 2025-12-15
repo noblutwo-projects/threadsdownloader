@@ -9,19 +9,15 @@ export const downloadRoutes = new Elysia({ prefix: '' })
     async ({ body }) => {
       try {
         const { url } = body;
-
         if (!url) {
           return { error: 'Vui lòng cung cấp URL video' };
         }
-
         if (!isValidUrl(url)) {
           return { error: 'URL không hợp lệ' };
         }
-
         if (!isSupportedPlatform(url)) {
           return { error: 'Nền tảng không được hỗ trợ' };
         }
-
         const info = await getVideoInfo(url);
         return info;
       } catch (error) {
@@ -29,15 +25,15 @@ export const downloadRoutes = new Elysia({ prefix: '' })
         return { error: 'Không thể lấy thông tin video. ' + (error instanceof Error ? error.message : '') };
       }
     }, {
-      detail: {
-        tags: ['Video'],
-        summary: 'Lấy thông tin video',
-        description: 'Lấy thông tin video từ URL mà không tải về',
-      },
-      body: t.Object({
-        url: t.String({ description: 'URL của video' })
-      })
+    detail: {
+      tags: ['Video'],
+      summary: 'Lấy thông tin video',
+      description: 'Lấy thông tin video từ URL mà không tải về',
+    },
+    body: t.Object({
+      url: t.String({ description: 'URL của video' })
     })
+  })
 
   // Start download
   .post('/download',
@@ -73,24 +69,24 @@ export const downloadRoutes = new Elysia({ prefix: '' })
         return { error: 'Không thể tải video' };
       }
     }, {
-      detail: {
-        tags: ['Download'],
-        summary: 'Tải video từ URL',
-        description: 'Bắt đầu tải video và trả về downloadId để theo dõi tiến trình. Hỗ trợ chọn chất lượng và sử dụng aria2c để tải nhanh hơn.',
-      },
-      body: t.Object({
-        url: t.String({ description: 'URL của video cần tải' }),
-        quality: t.Optional(t.Union([
-          t.Literal('best'),
-          t.Literal('1080p'),
-          t.Literal('720p'),
-          t.Literal('480p'),
-          t.Literal('360p'),
-          t.Literal('audio'),
-        ], { default: '720p', description: 'Chất lượng video' })),
-        useAria2c: t.Optional(t.Boolean({ default: true, description: 'Sử dụng aria2c để tải nhanh hơn' })),
-      })
+    detail: {
+      tags: ['Download'],
+      summary: 'Tải video từ URL',
+      description: 'Bắt đầu tải video và trả về downloadId để theo dõi tiến trình. Hỗ trợ chọn chất lượng và sử dụng aria2c để tải nhanh hơn.',
+    },
+    body: t.Object({
+      url: t.String({ description: 'URL của video cần tải' }),
+      quality: t.Optional(t.Union([
+        t.Literal('best'),
+        t.Literal('1080p'),
+        t.Literal('720p'),
+        t.Literal('480p'),
+        t.Literal('360p'),
+        t.Literal('audio'),
+      ], { default: '720p', description: 'Chất lượng video' })),
+      useAria2c: t.Optional(t.Boolean({ default: true, description: 'Sử dụng aria2c để tải nhanh hơn' })),
     })
+  })
 
   // Get download status
   .get('/download/status/:downloadId',
@@ -104,9 +100,9 @@ export const downloadRoutes = new Elysia({ prefix: '' })
 
       return progress;
     }, {
-      detail: {
-        tags: ['Download'],
-        summary: 'Kiểm tra trạng thái tải',
-        description: 'Lấy trạng thái và tiến trình tải video',
-      }
-    });
+    detail: {
+      tags: ['Download'],
+      summary: 'Kiểm tra trạng thái tải',
+      description: 'Lấy trạng thái và tiến trình tải video',
+    }
+  });
