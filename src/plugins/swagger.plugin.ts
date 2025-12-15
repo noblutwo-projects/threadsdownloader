@@ -10,10 +10,10 @@ export const swaggerPlugin = swagger({
       version: '1.0.0',
     },
     tags: [
-      {
-        name: 'Video',
-        description: 'Endpoints liên quan đến thông tin video',
-      },
+      // {
+      //   name: 'Video',
+      //   description: 'Endpoints liên quan đến thông tin video',
+      // },
       {
         name: 'Download',
         description: 'Endpoints liên quan đến việc tải video',
