@@ -5,35 +5,35 @@ import { isValidUrl, isSupportedPlatform, SUPPORTED_PLATFORMS } from '../utils';
 
 export const downloadRoutes = new Elysia({ prefix: '' })
   // Get video info
-  .post('/video/info',
-    async ({ body }) => {
-      try {
-        const { url } = body;
-        if (!url) {
-          return { error: 'Vui lòng cung cấp URL video' };
-        }
-        if (!isValidUrl(url)) {
-          return { error: 'URL không hợp lệ' };
-        }
-        if (!isSupportedPlatform(url)) {
-          return { error: 'Nền tảng không được hỗ trợ' };
-        }
-        const info = await getVideoInfo(url);
-        return info;
-      } catch (error) {
-        console.error('Get info error:', error);
-        return { error: 'Không thể lấy thông tin video. ' + (error instanceof Error ? error.message : '') };
-      }
-    }, {
-    detail: {
-      tags: ['Video'],
-      summary: 'Lấy thông tin video',
-      description: 'Lấy thông tin video từ URL mà không tải về',
-    },
-    body: t.Object({
-      url: t.String({ description: 'URL của video' })
-    })
-  })
+  // .post('/video/info',
+  //   async ({ body }) => {
+  //     try {
+  //       const { url } = body;
+  //       if (!url) {
+  //         return { error: 'Vui lòng cung cấp URL video' };
+  //       }
+  //       if (!isValidUrl(url)) {
+  //         return { error: 'URL không hợp lệ' };
+  //       }
+  //       if (!isSupportedPlatform(url)) {
+  //         return { error: 'Nền tảng không được hỗ trợ' };
+  //       }
+  //       const info = await getVideoInfo(url);
+  //       return info;
+  //     } catch (error) {
+  //       console.error('Get info error:', error);
+  //       return { error: 'Không thể lấy thông tin video. ' + (error instanceof Error ? error.message : '') };
+  //     }
+  //   }, {
+  //   detail: {
+  //     tags: ['Video'],
+  //     summary: 'Lấy thông tin video',
+  //     description: 'Lấy thông tin video từ URL mà không tải về',
+  //   },
+  //   body: t.Object({
+  //     url: t.String({ description: 'URL của video' })
+  //   })
+  // })
 
   // Start download
   .post('/download',

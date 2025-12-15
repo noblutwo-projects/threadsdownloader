@@ -18,10 +18,10 @@ export const swaggerPlugin = swagger({
         name: 'Download',
         description: 'Endpoints liên quan đến việc tải video',
       },
-      {
-        name: 'Files',
-        description: 'Endpoints quản lý file đã tải',
-      },
+      // {
+      //   name: 'Files',
+      //   description: 'Endpoints quản lý file đã tải',
+      // },
     ],
     servers: [
       {
