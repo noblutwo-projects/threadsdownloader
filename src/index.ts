@@ -13,44 +13,13 @@ const CONFIG = {
   DEFAULT_QUALITY: process.env.DEFAULT_QUALITY || '720p',
 };
 
-// Runtime config (có thể thay đổi qua API)
-let runtimeDownloadDir: string | null = null;
-
-// Resolve download directory to absolute path
+// Resolve download directory to absolute path (thư mục tạm trên server)
 function getDownloadsDir(): string {
-  const dir = runtimeDownloadDir || CONFIG.DOWNLOAD_DIR;
-  // Nếu là đường dẫn tương đối, resolve từ thư mục hiện tại
+  const dir = CONFIG.DOWNLOAD_DIR;
   if (dir.startsWith('./') || dir.startsWith('../') || !path.isAbsolute(dir)) {
     return path.resolve(process.cwd(), dir);
   }
   return dir;
-}
-
-// Set download directory
-function setDownloadsDir(newDir: string): { success: boolean; path: string; error?: string } {
-  try {
-    let resolvedPath = newDir;
-    if (newDir.startsWith('./') || newDir.startsWith('../') || !path.isAbsolute(newDir)) {
-      resolvedPath = path.resolve(process.cwd(), newDir);
-    }
-
-    // Tạo thư mục nếu chưa tồn tại
-    fs.ensureDirSync(resolvedPath);
-
-    // Kiểm tra quyền ghi
-    fs.accessSync(resolvedPath, fs.constants.W_OK);
-
-    runtimeDownloadDir = newDir;
-    console.log(`📁 Download directory changed to: ${resolvedPath}`);
-
-    return { success: true, path: resolvedPath };
-  } catch (error) {
-    return {
-      success: false,
-      path: newDir,
-      error: error instanceof Error ? error.message : 'Khong the truy cap thu muc'
-    };
-  }
 }
 
 console.log('📁 Download directory:', getDownloadsDir());
@@ -228,470 +197,6 @@ async function execYtDlpWithProgress(args: string[], downloadId: string): Promis
   }
 }
 
-// ==================== HTML TEMPLATE ====================
-const HTML_TEMPLATE = `
-<!DOCTYPE html>
-<html lang="vi">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Video Downloader</title>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-    }
-    .container {
-      background: white;
-      padding: 30px;
-      border-radius: 15px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-    }
-    h1 {
-      color: #333;
-      text-align: center;
-      margin-bottom: 30px;
-      font-size: 2em;
-    }
-    .form-group { margin-bottom: 20px; }
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-weight: 600;
-      color: #555;
-    }
-    input[type="url"], input[type="text"], select {
-      width: 100%;
-      padding: 14px;
-      border: 2px solid #e0e0e0;
-      border-radius: 8px;
-      font-size: 16px;
-      transition: border-color 0.3s;
-    }
-    input[type="url"]:focus, input[type="text"]:focus, select:focus {
-      outline: none;
-      border-color: #667eea;
-    }
-    .path-group {
-      display: flex;
-      gap: 10px;
-      align-items: flex-end;
-    }
-    .path-group .form-group {
-      flex: 1;
-      margin-bottom: 0;
-    }
-    .path-group button {
-      width: auto;
-      padding: 14px 20px;
-      white-space: nowrap;
-    }
-    .current-path {
-      font-size: 12px;
-      color: #666;
-      margin-top: 5px;
-      word-break: break-all;
-    }
-    .path-success {
-      color: #28a745;
-    }
-    .path-error {
-      color: #dc3545;
-    }
-    .options {
-      display: flex;
-      gap: 15px;
-      margin-bottom: 20px;
-    }
-    .options .form-group {
-      flex: 1;
-      margin-bottom: 0;
-    }
-    button {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 14px 30px;
-      border: none;
-      border-radius: 8px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      width: 100%;
-      transition: transform 0.2s, box-shadow 0.2s;
-    }
-    button:hover:not(:disabled) {
-      transform: translateY(-2px);
-      box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-      transform: none;
-    }
-    .status {
-      margin-top: 20px;
-      padding: 15px;
-      border-radius: 8px;
-      display: none;
-    }
-    .success {
-      background-color: #d4edda;
-      color: #155724;
-      border: 1px solid #c3e6cb;
-    }
-    .error {
-      background-color: #f8d7da;
-      color: #721c24;
-      border: 1px solid #f5c6cb;
-    }
-    .info {
-      background-color: #e7f3ff;
-      color: #0c5460;
-      border: 1px solid #b8daff;
-    }
-    .progress-container {
-      margin-top: 20px;
-      display: none;
-    }
-    .progress-bar {
-      width: 100%;
-      height: 24px;
-      background-color: #e9ecef;
-      border-radius: 12px;
-      overflow: hidden;
-      position: relative;
-    }
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-      transition: width 0.3s ease;
-      border-radius: 12px;
-    }
-    .progress-text {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-weight: 600;
-      font-size: 12px;
-      color: #333;
-    }
-    .progress-details {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 8px;
-      font-size: 13px;
-      color: #666;
-    }
-    .video-info {
-      margin-top: 15px;
-      padding: 15px;
-      background: #f8f9fa;
-      border-radius: 8px;
-      display: none;
-    }
-    .video-info h3 {
-      margin: 0 0 10px 0;
-      color: #333;
-    }
-    .video-info p {
-      margin: 5px 0;
-      color: #666;
-    }
-    .download-link {
-      margin-top: 15px;
-    }
-    .download-link a {
-      display: inline-block;
-      background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-      color: white;
-      padding: 12px 24px;
-      border-radius: 8px;
-      text-decoration: none;
-      font-weight: 600;
-      transition: transform 0.2s;
-    }
-    .download-link a:hover {
-      transform: translateY(-2px);
-    }
-    .swagger-link {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: white;
-      color: #333;
-      padding: 10px 20px;
-      border-radius: 8px;
-      text-decoration: none;
-      font-weight: 600;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-    }
-  </style>
-</head>
-<body>
-  <a href="/swagger" class="swagger-link">API Docs</a>
-  <div class="container">
-    <h1>Video Downloader</h1>
-    <form id="downloadForm">
-      <div class="form-group">
-        <label for="videoUrl">URL Video:</label>
-        <input type="url" id="videoUrl" placeholder="https://www.youtube.com/watch?v=..." required>
-      </div>
-      <div class="options">
-        <div class="form-group">
-          <label for="quality">Chat luong:</label>
-          <select id="quality">
-            <option value="best">Cao nhat</option>
-            <option value="1080p">1080p</option>
-            <option value="720p" selected>720p</option>
-            <option value="480p">480p</option>
-            <option value="360p">360p</option>
-            <option value="audio">Chi audio</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="form-group">
-        <label for="savePath">Thu muc luu file:</label>
-        <div class="path-group">
-          <div class="form-group">
-            <input type="text" id="savePath" placeholder="/home/user/Downloads">
-          </div>
-          <button type="button" id="setPathBtn" onclick="setDownloadPath()">Thay doi</button>
-        </div>
-        <div id="currentPath" class="current-path">Dang tai...</div>
-      </div>
-
-      <button type="submit" id="downloadBtn">Tai Video</button>
-    </form>
-
-    <div id="videoInfo" class="video-info"></div>
-
-    <div id="progressContainer" class="progress-container">
-      <div class="progress-bar">
-        <div class="progress-fill" id="progressFill"></div>
-        <span class="progress-text" id="progressText">0%</span>
-      </div>
-      <div class="progress-details">
-        <span id="speedText">Toc do: --</span>
-        <span id="etaText">ETA: --</span>
-      </div>
-    </div>
-
-    <div id="status" class="status"></div>
-  </div>
-
-  <script>
-    const form = document.getElementById('downloadForm');
-    const statusDiv = document.getElementById('status');
-    const downloadBtn = document.getElementById('downloadBtn');
-    const progressContainer = document.getElementById('progressContainer');
-    const progressFill = document.getElementById('progressFill');
-    const progressText = document.getElementById('progressText');
-    const speedText = document.getElementById('speedText');
-    const etaText = document.getElementById('etaText');
-    const videoInfo = document.getElementById('videoInfo');
-    const savePathInput = document.getElementById('savePath');
-    const currentPathDiv = document.getElementById('currentPath');
-
-    // Load current config on page load
-    async function loadConfig() {
-      try {
-        const response = await fetch('/config');
-        const config = await response.json();
-        savePathInput.value = config.downloadDir;
-        currentPathDiv.textContent = 'Hien tai: ' + config.downloadDir;
-        currentPathDiv.className = 'current-path path-success';
-      } catch (e) {
-        currentPathDiv.textContent = 'Khong the tai cau hinh';
-        currentPathDiv.className = 'current-path path-error';
-      }
-    }
-    loadConfig();
-
-    // Set download path
-    async function setDownloadPath() {
-      const newPath = savePathInput.value.trim();
-      if (!newPath) {
-        currentPathDiv.textContent = 'Vui long nhap duong dan';
-        currentPathDiv.className = 'current-path path-error';
-        return;
-      }
-
-      try {
-        const response = await fetch('/config/download-dir', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: newPath }),
-        });
-        const result = await response.json();
-
-        if (result.success) {
-          currentPathDiv.textContent = 'Da thay doi: ' + result.path;
-          currentPathDiv.className = 'current-path path-success';
-        } else {
-          currentPathDiv.textContent = 'Loi: ' + result.error;
-          currentPathDiv.className = 'current-path path-error';
-        }
-      } catch (e) {
-        currentPathDiv.textContent = 'Loi ket noi server';
-        currentPathDiv.className = 'current-path path-error';
-      }
-    }
-
-    function showStatus(message, type) {
-      statusDiv.innerHTML = message;
-      statusDiv.className = 'status ' + type;
-      statusDiv.style.display = 'block';
-    }
-
-    function hideStatus() {
-      statusDiv.style.display = 'none';
-    }
-
-    function setLoading(isLoading) {
-      downloadBtn.disabled = isLoading;
-      downloadBtn.textContent = isLoading ? 'Dang xu ly...' : 'Tai Video';
-    }
-
-    function updateProgress(data) {
-      progressFill.style.width = data.progress + '%';
-      progressText.textContent = data.progress.toFixed(1) + '%';
-      speedText.textContent = 'Toc do: ' + (data.speed || '--');
-      etaText.textContent = 'ETA: ' + (data.eta || '--');
-    }
-
-    function showVideoInfo(info) {
-      videoInfo.innerHTML =
-        '<h3>' + info.title + '</h3>' +
-        '<p>Thoi luong: ' + info.duration + '</p>' +
-        '<p>Kenh: ' + info.uploader + '</p>';
-      videoInfo.style.display = 'block';
-    }
-
-    async function pollProgress(downloadId) {
-      let retries = 0;
-      const maxRetries = 300; // 5 minutes max
-
-      while (retries < maxRetries) {
-        try {
-          const response = await fetch('/download/status/' + downloadId);
-          const data = await response.json();
-
-          if (data.error) {
-            progressContainer.style.display = 'none';
-            showStatus('Loi: ' + data.error, 'error');
-            setLoading(false);
-            return;
-          }
-
-          updateProgress(data);
-
-          if (data.status === 'completed') {
-            progressContainer.style.display = 'none';
-            showStatus(
-              'Tai thanh cong! (' + data.size + ')' +
-              '<div class="download-link">' +
-              '<a href="' + data.downloadUrl + '" download>Tai file ve may</a>' +
-              '</div>',
-              'success'
-            );
-            setLoading(false);
-            return;
-          } else if (data.status === 'error') {
-            progressContainer.style.display = 'none';
-            showStatus('Loi: ' + data.message, 'error');
-            setLoading(false);
-            return;
-          }
-
-          await new Promise(r => setTimeout(r, 500));
-          retries++;
-        } catch (e) {
-          console.error('Poll error:', e);
-          await new Promise(r => setTimeout(r, 1000));
-          retries++;
-        }
-      }
-
-      showStatus('Qua thoi gian cho', 'error');
-      setLoading(false);
-    }
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const url = document.getElementById('videoUrl').value;
-      const quality = document.getElementById('quality').value;
-
-      if (!url) {
-        showStatus('Vui long nhap URL video', 'error');
-        return;
-      }
-
-      setLoading(true);
-      hideStatus();
-      videoInfo.style.display = 'none';
-      progressContainer.style.display = 'none';
-
-      try {
-        // Step 1: Get video info
-        showStatus('Dang lay thong tin video...', 'info');
-
-        const infoResponse = await fetch('/video/info', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url }),
-        });
-        const info = await infoResponse.json();
-
-        if (info.error) {
-          showStatus('Loi: ' + info.error, 'error');
-          setLoading(false);
-          return;
-        }
-
-        showVideoInfo(info);
-
-        // Step 2: Start download
-        showStatus('Dang bat dau tai...', 'info');
-        progressContainer.style.display = 'block';
-        updateProgress({ progress: 0 });
-
-        const response = await fetch('/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, quality }),
-        });
-        const result = await response.json();
-
-        if (result.error) {
-          progressContainer.style.display = 'none';
-          showStatus('Loi: ' + result.error, 'error');
-          setLoading(false);
-          return;
-        }
-
-        if (result.downloadId) {
-          hideStatus();
-          await pollProgress(result.downloadId);
-        }
-
-      } catch (error) {
-        progressContainer.style.display = 'none';
-        showStatus('Loi ket noi: ' + error.message, 'error');
-        setLoading(false);
-      }
-    });
-  </script>
-</body>
-</html>
-`;
 
 // ==================== QUALITY PRESETS ====================
 const QUALITY_PRESETS: Record<string, string> = {
@@ -714,15 +219,26 @@ const app = new Elysia()
     prefix: '/downloads'
   }))
 
-  // Home page
+  // API Info
   .get('/', () => {
-    return new Response(HTML_TEMPLATE, {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    });
+    return {
+      name: 'Video Downloader API',
+      version: '1.0.0',
+      description: 'API de tai video tu cac nen tang nhu YouTube, Facebook, TikTok...',
+      endpoints: {
+        'POST /video/info': 'Lay thong tin video',
+        'POST /download/stream': 'Tai video va stream truc tiep ve client',
+        'POST /download': 'Bat dau tai video (luu tren server tam thoi)',
+        'GET /download/status/:downloadId': 'Kiem tra trang thai tai',
+        'GET /files': 'Danh sach file da tai',
+      },
+      supportedPlatforms: SUPPORTED_PLATFORMS,
+      swagger: '/swagger',
+    };
   }, {
     detail: {
-      tags: ['Video'],
-      summary: 'Trang chu Video Downloader',
+      tags: ['API'],
+      summary: 'Thong tin API',
     }
   })
 
@@ -913,6 +429,122 @@ const app = new Elysia()
     }
   })
 
+  // Stream download - download video and stream directly to client without saving to server
+  .post('/download/stream', async ({ body }) => {
+    try {
+      const { url, quality } = body;
+      const selectedQuality = quality ?? '720p';
+
+      if (!url || !isValidUrl(url)) {
+        return new Response(JSON.stringify({ error: 'URL khong hop le' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      if (!isSupportedPlatform(url)) {
+        return new Response(JSON.stringify({ error: 'Nen tang khong duoc ho tro' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      console.log(`Starting stream download: ${url}`);
+
+      // Get video info first for filename
+      const infoOutput = await execYtDlp([
+        '--dump-json',
+        '--no-download',
+        '--no-warnings',
+        url
+      ]);
+      const info = JSON.parse(infoOutput);
+
+      const formatString: string = QUALITY_PRESETS[selectedQuality] ?? QUALITY_PRESETS['720p'] ?? 'best[height<=720]/best';
+
+      // Create a temporary file to download to, then stream it
+      const tempDir = path.join(process.cwd(), '.temp');
+      await fs.ensureDir(tempDir);
+
+      const safeTitle = (info.title || 'video').replace(/[^a-zA-Z0-9_\-\s]/g, '_').substring(0, 100);
+      const ext = selectedQuality === 'audio' ? 'm4a' : 'mp4';
+      const tempFilename = `${Date.now()}_${safeTitle}.${ext}`;
+      const tempFilePath = path.join(tempDir, tempFilename);
+
+      // Download to temp file
+      const ytDlpPath = getYtDlpPath();
+      const args: string[] = [
+        '-f', formatString,
+        '-o', tempFilePath,
+        '--restrict-filenames',
+        '--concurrent-fragments', '8',
+        '--no-warnings',
+        '--no-playlist',
+        url
+      ];
+
+      const proc = Bun.spawn([ytDlpPath, ...args], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+
+      await proc.exited;
+
+      // Check if file exists
+      if (!(await fs.pathExists(tempFilePath))) {
+        return new Response(JSON.stringify({ error: 'Khong the tai video' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Get file stats
+      const stats = await fs.stat(tempFilePath);
+      const file = Bun.file(tempFilePath);
+
+      // Create filename for download
+      const downloadFilename = `${safeTitle}.${ext}`;
+
+      // Stream the file to client
+      const response = new Response(file, {
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'Content-Length': stats.size.toString(),
+          'Content-Disposition': `attachment; filename="${downloadFilename}"`,
+        }
+      });
+
+      // Clean up temp file after response is sent (delayed)
+      setTimeout(async () => {
+        try {
+          await fs.remove(tempFilePath);
+          console.log(`Cleaned up temp file: ${tempFilename}`);
+        } catch (e) {
+          console.error('Error cleaning up temp file:', e);
+        }
+      }, 60000); // Delete after 1 minute
+
+      return response;
+
+    } catch (error) {
+      console.error('Stream download error:', error);
+      return new Response(JSON.stringify({ error: 'Khong the tai video' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }, {
+    detail: {
+      tags: ['Download'],
+      summary: 'Stream download video truc tiep ve client',
+      description: 'Tai video va stream truc tiep ve client, khong luu tren server',
+    },
+    body: t.Object({
+      url: t.String(),
+      quality: t.Optional(t.String())
+    })
+  })
+
   // List files
   .get('/files', async () => {
     try {
@@ -946,41 +578,6 @@ const app = new Elysia()
     }
   })
 
-  // Get current config
-  .get('/config', () => {
-    return {
-      downloadDir: getDownloadsDir(),
-      cleanupMaxAge: CONFIG.CLEANUP_MAX_AGE,
-      defaultQuality: CONFIG.DEFAULT_QUALITY,
-      port: CONFIG.PORT,
-    };
-  }, {
-    detail: {
-      tags: ['Config'],
-      summary: 'Xem cau hinh hien tai',
-    }
-  })
-
-  // Set download directory
-  .post('/config/download-dir', async ({ body }) => {
-    const { path: newPath } = body;
-
-    if (!newPath) {
-      return { success: false, error: 'Vui long nhap duong dan' };
-    }
-
-    const result = setDownloadsDir(newPath);
-    return result;
-  }, {
-    detail: {
-      tags: ['Config'],
-      summary: 'Thay doi thu muc luu file',
-      description: 'Thay doi duong dan thu muc luu file tai ve. Co the dung duong dan tuyet doi hoac tuong doi.',
-    },
-    body: t.Object({
-      path: t.String({ description: 'Duong dan thu muc moi' })
-    })
-  })
 
   .listen(CONFIG.PORT);
 
