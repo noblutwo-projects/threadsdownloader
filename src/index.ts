@@ -9,15 +9,6 @@ const CONFIG = {
   DEFAULT_QUALITY: process.env.DEFAULT_QUALITY || '720p',
 };
 
-// ==================== DOWNLOAD PATH STORE ====================
-interface UserDownloadConfig {
-  downloadPath: string;
-  updatedAt: Date;
-}
-
-// Lưu config download path của từng user (theo session/IP)
-const userDownloadPaths: Map<string, UserDownloadConfig> = new Map();
-
 // ==================== UTILS ====================
 function isValidUrl(string: string): boolean {
   try {
@@ -99,8 +90,6 @@ const app = new Elysia()
       endpoints: {
         'POST /video/info': 'Lay thong tin video',
         'POST /download/stream': 'Tai video va stream truc tiep ve client',
-        'POST /download/path': 'Luu duong dan download cua user',
-        'GET /download/path': 'Lay duong dan download hien tai',
       },
       qualityOptions: ['best', '1080p', '720p', '480p', '360p', 'audio'],
       supportedPlatforms: SUPPORTED_PLATFORMS,
@@ -110,65 +99,6 @@ const app = new Elysia()
     detail: {
       tags: ['API'],
       summary: 'Thong tin API',
-    }
-  })
-
-  // Set download path - Frontend gửi đường dẫn user đã chọn
-  .post('/download/path', ({ body, request }) => {
-    const { downloadPath } = body;
-
-    // Lấy IP hoặc identifier của user
-    const userIP = request.headers.get('x-forwarded-for') ||
-                   request.headers.get('x-real-ip') ||
-                   'default';
-
-    userDownloadPaths.set(userIP, {
-      downloadPath,
-      updatedAt: new Date(),
-    });
-
-    console.log(`User ${userIP} set download path: ${downloadPath}`);
-
-    return {
-      success: true,
-      downloadPath,
-      message: 'Duong dan da duoc luu',
-    };
-  }, {
-    detail: {
-      tags: ['Config'],
-      summary: 'Luu duong dan download',
-      description: 'Frontend gui duong dan ma user da chon de luu tru',
-    },
-    body: t.Object({
-      downloadPath: t.String()
-    })
-  })
-
-  // Get download path - Lấy đường dẫn hiện tại của user
-  .get('/download/path', ({ request }) => {
-    const userIP = request.headers.get('x-forwarded-for') ||
-                   request.headers.get('x-real-ip') ||
-                   'default';
-
-    const config = userDownloadPaths.get(userIP);
-
-    if (!config) {
-      return {
-        downloadPath: null,
-        message: 'Chua cau hinh duong dan download',
-      };
-    }
-
-    return {
-      downloadPath: config.downloadPath,
-      updatedAt: config.updatedAt,
-    };
-  }, {
-    detail: {
-      tags: ['Config'],
-      summary: 'Lay duong dan download hien tai',
-      description: 'Tra ve duong dan download ma user da chon truoc do',
     }
   })
 
