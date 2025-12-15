@@ -161,51 +161,51 @@ const app = new Elysia()
   // ==================== VIDEO ENDPOINTS ====================
 
   // Get video info
-  .post('/video/info', async ({ body }) => {
-    try {
-      const { url } = body;
+  // .post('/video/info', async ({ body }) => {
+  //   try {
+  //     const { url } = body;
 
-      if (!url || !isValidUrl(url)) {
-        return { error: 'URL khong hop le' };
-      }
+  //     if (!url || !isValidUrl(url)) {
+  //       return { error: 'URL khong hop le' };
+  //     }
 
-      if (!isSupportedPlatform(url)) {
-        return { error: 'Nen tang khong duoc ho tro' };
-      }
+  //     if (!isSupportedPlatform(url)) {
+  //       return { error: 'Nen tang khong duoc ho tro' };
+  //     }
 
-      console.log(`Getting video info: ${url}`);
+  //     console.log(`Getting video info: ${url}`);
 
-      const output = await execYtDlp([
-        '--dump-json',
-        '--no-download',
-        '--no-warnings',
-        url
-      ]);
+  //     const output = await execYtDlp([
+  //       '--dump-json',
+  //       '--no-download',
+  //       '--no-warnings',
+  //       url
+  //     ]);
 
-      const info = JSON.parse(output);
-      const duration = info.duration
-        ? `${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}`
-        : 'Unknown';
+  //     const info = JSON.parse(output);
+  //     const duration = info.duration
+  //       ? `${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}`
+  //       : 'Unknown';
 
-      return {
-        title: info.title || 'Unknown',
-        duration,
-        uploader: info.uploader || info.channel || 'Unknown',
-        thumbnail: info.thumbnail,
-      };
-    } catch (error) {
-      console.error('Get info error:', error);
-      return { error: 'Khong the lay thong tin video' };
-    }
-  }, {
-    detail: {
-      tags: ['Video'],
-      summary: 'Lay thong tin video',
-    },
-    body: t.Object({
-      url: t.String()
-    })
-  })
+  //     return {
+  //       title: info.title || 'Unknown',
+  //       duration,
+  //       uploader: info.uploader || info.channel || 'Unknown',
+  //       thumbnail: info.thumbnail,
+  //     };
+  //   } catch (error) {
+  //     console.error('Get info error:', error);
+  //     return { error: 'Khong the lay thong tin video' };
+  //   }
+  // }, {
+  //   detail: {
+  //     tags: ['Video'],
+  //     summary: 'Lay thong tin video',
+  //   },
+  //   body: t.Object({
+  //     url: t.String()
+  //   })
+  // })
 
   // Stream download - download video and stream directly to client
   .post('/download/stream', async ({ body }) => {
