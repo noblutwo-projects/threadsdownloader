@@ -9,15 +9,11 @@ const CONFIG = {
   DEFAULT_QUALITY: process.env.DEFAULT_QUALITY || '720p',
 };
 
-// ==================== USER CONFIG STORE ====================
-interface DownloadConfig {
-  folderName: string;      // Tên thư mục user chọn (vd: "Downloads", "Desktop")
-  lastDownload?: string;   // File cuối cùng đã tải
+// ==================== DOWNLOAD FOLDER CONFIG ====================
+let currentFolder: {
+  name: string;
   updatedAt: Date;
-}
-
-// Lưu config theo session ID
-const userConfigs: Map<string, DownloadConfig> = new Map();
+} | null = null;
 
 // ==================== UTILS ====================
 function isValidUrl(string: string): boolean {
@@ -100,9 +96,8 @@ const app = new Elysia()
       endpoints: {
         'POST /video/info': 'Lay thong tin video',
         'POST /download/stream': 'Tai video va stream truc tiep ve client',
-        'POST /config/folder': 'Luu thong tin thu muc user da chon',
-        'GET /config/folder': 'Lay thong tin thu muc hien tai',
-        'GET /config/folder/:sessionId': 'Lay thong tin thu muc theo session',
+        'POST /config/folder': 'Luu thu muc download',
+        'GET /config/folder': 'Lay thu muc download hien tai',
       },
       qualityOptions: ['best', '1080p', '720p', '480p', '360p', 'audio'],
       supportedPlatforms: SUPPORTED_PLATFORMS,
@@ -117,92 +112,50 @@ const app = new Elysia()
 
   // ==================== CONFIG ENDPOINTS ====================
 
-  // Lưu thông tin thư mục user đã chọn
+  // Lưu thư mục download
   .post('/config/folder', ({ body }) => {
-    const { sessionId, folderName } = body;
+    const { folderName } = body;
 
-    if (!sessionId || !folderName) {
-      return { error: 'sessionId va folderName la bat buoc' };
-    }
-
-    userConfigs.set(sessionId, {
-      folderName,
+    currentFolder = {
+      name: folderName,
       updatedAt: new Date(),
-    });
+    };
 
-    console.log(`Session ${sessionId} set folder: ${folderName}`);
+    console.log(`Folder set to: ${folderName}`);
 
     return {
       success: true,
-      sessionId,
       folderName,
-      message: `Da luu thu muc: ${folderName}`,
+      message: `Thu muc luu file: ${folderName}`,
     };
   }, {
     detail: {
       tags: ['Config'],
-      summary: 'Luu thong tin thu muc download',
+      summary: 'Luu thu muc download',
     },
     body: t.Object({
-      sessionId: t.String(),
       folderName: t.String(),
     })
   })
 
-  // Lấy thông tin thư mục theo sessionId
-  .get('/config/folder/:sessionId', ({ params }) => {
-    const { sessionId } = params;
-    const config = userConfigs.get(sessionId);
-
-    if (!config) {
+  // Lấy thư mục hiện tại
+  .get('/config/folder', () => {
+    if (!currentFolder) {
       return {
-        sessionId,
         folderName: null,
         message: 'Chua chon thu muc luu file',
       };
     }
 
     return {
-      sessionId,
-      folderName: config.folderName,
-      lastDownload: config.lastDownload,
-      updatedAt: config.updatedAt,
+      folderName: currentFolder.name,
+      updatedAt: currentFolder.updatedAt,
     };
   }, {
     detail: {
       tags: ['Config'],
-      summary: 'Lay thong tin thu muc theo session',
+      summary: 'Lay thu muc download hien tai',
     }
-  })
-
-  // Cập nhật file đã tải cuối cùng
-  .post('/config/download-complete', ({ body }) => {
-    const { sessionId, fileName } = body;
-
-    const config = userConfigs.get(sessionId);
-    if (config) {
-      config.lastDownload = fileName;
-      config.updatedAt = new Date();
-    }
-
-    return {
-      success: true,
-      sessionId,
-      fileName,
-      folderName: config?.folderName,
-      message: config
-        ? `File "${fileName}" da duoc luu vao "${config.folderName}"`
-        : `File "${fileName}" da duoc tai`,
-    };
-  }, {
-    detail: {
-      tags: ['Config'],
-      summary: 'Cap nhat thong tin file da tai',
-    },
-    body: t.Object({
-      sessionId: t.String(),
-      fileName: t.String(),
-    })
   })
 
   // ==================== VIDEO ENDPOINTS ====================
