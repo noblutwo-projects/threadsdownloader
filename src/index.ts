@@ -83,9 +83,8 @@ const QUALITY_PRESETS: Record<string, string> = {
 
 // ==================== APP ====================
 const app = new Elysia()
-   .use(cors())
+  .use(cors())
   .use(swaggerPlugin)
-
   // API Info
   .get('/', () => {
     return {
