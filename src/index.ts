@@ -3,19 +3,17 @@ import fs from 'fs-extra';
 import path from 'path';
 import { swaggerPlugin } from './plugins';
 import { cors } from "@elysiajs/cors";
-// ==================== CONFIG ====================
+
 const CONFIG = {
   PORT: parseInt(process.env.PORT || '3000'),
   DEFAULT_QUALITY: process.env.DEFAULT_QUALITY || '720p',
 };
 
-// ==================== DOWNLOAD FOLDER CONFIG ====================
 let currentFolder: {
   name: string;
   updatedAt: Date;
 } | null = null;
 
-// ==================== UTILS ====================
 function isValidUrl(string: string): boolean {
   try {
     const url = new URL(string);
