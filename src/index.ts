@@ -2,7 +2,7 @@ import { Elysia, t } from 'elysia';
 import fs from 'fs-extra';
 import path from 'path';
 import { swaggerPlugin } from './plugins';
-
+import { cors } from "@elysiajs/cors";
 // ==================== CONFIG ====================
 const CONFIG = {
   PORT: parseInt(process.env.PORT || '3000'),
@@ -85,6 +85,7 @@ const QUALITY_PRESETS: Record<string, string> = {
 
 // ==================== APP ====================
 const app = new Elysia()
+   .use(cors())
   .use(swaggerPlugin)
 
   // API Info
