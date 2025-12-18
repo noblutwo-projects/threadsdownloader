@@ -1,4 +1,4 @@
-name: Deploy via SSH
+name: Deploy SSH Tunnel v2
 
 on:
   push:
@@ -13,15 +13,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
+      - name: Install cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          sudo mv cloudflared /usr/local/bin/
+
+      - name: Setup SSH
+        env:
+          SSH_KEY_BASE64: ${{ secrets.SSH_KEY_BASE64 }}
+          TUNNEL_HOST: ${{ secrets.CF_TUNNEL_HOSTNAME }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY_BASE64" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "Host $TUNNEL_HOST" > ~/.ssh/config
+          echo "  ProxyCommand cloudflared access ssh --hostname %h" >> ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+          echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
+          echo "  IdentityFile ~/.ssh/id_rsa" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+          echo "=== SSH Config ==="
+          cat ~/.ssh/config
+          echo "=== Key Check ==="
+          ssh-keygen -lf ~/.ssh/id_rsa || echo "Key invalid"
+          echo "=== Key Header ==="
+          head -1 ~/.ssh/id_rsa
+
+      - name: Deploy
+        env:
+          USER: ${{ secrets.VM_USERNAME }}
+          HOST: ${{ secrets.CF_TUNNEL_HOSTNAME }}
+        run: |
+          ssh "$USER@$HOST" << 'ENDSSH'
             cd ~/threadsdownloader
+            echo "=== Git Stash ==="
             git stash
+            echo "=== Git Pull ==="
             git pull origin master
+            echo "=== Git Stash Pop ==="
             git stash pop || true
-            echo "Deployment completed at $(date)"
+            echo "=== Deployment completed at $(date) ==="
+          ENDSSH
