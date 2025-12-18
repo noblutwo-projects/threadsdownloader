@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - main
 
 jobs:
   deploy:
@@ -15,10 +16,10 @@ jobs:
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
-          password: ${{ secrets.VM_PASSWORD }}
+          key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            cd ~/threadsdownloader
+            cd ~/${{ github.event.repository.name }}
             git stash
-            git pull origin master
-            git stash pop
+            git pull origin ${{ github.ref_name }}
+            git stash pop || true
             echo "Deployment completed at $(date)"
