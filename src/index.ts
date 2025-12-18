@@ -1,11 +1,15 @@
 import { Elysia, t } from 'elysia';
 import path from 'path';
 import fs from 'fs-extra';
+import axios from 'axios';
 import { swaggerPlugin } from './plugins';
 import { cors } from "@elysiajs/cors";
+import { getThreadsMedia, getThreadsVideoInfo, extractThreadsEmbeddedUrl } from './threads-scraper';
 
 const CONFIG = {
   PORT: parseInt(process.env.PORT || '3000'),
+  // Use home directory for temp files (snap ffmpeg cannot access /tmp)
+  TEMP_DIR: path.join(process.env.HOME || '/tmp', '.video-downloads-temp'),
 };
 
 // ==================== HELPERS ====================
@@ -25,7 +29,8 @@ const SUPPORTED_PLATFORMS = [
   'tiktok.com', 'www.tiktok.com',
   'twitter.com', 'x.com', 'www.twitter.com', 'www.x.com',
   'vimeo.com', 'www.vimeo.com',
-  'dailymotion.com', 'www.dailymotion.com'
+  'dailymotion.com', 'www.dailymotion.com',
+  'threads.net', 'www.threads.net', 'threads.com', 'www.threads.com'
 ];
 
 function isSupportedPlatform(url: string): boolean {
@@ -39,6 +44,15 @@ function isSupportedPlatform(url: string): boolean {
   }
 }
 
+function isThreadsUrl(url: string): boolean {
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname.includes('threads.net') || urlObj.hostname.includes('threads.com');
+  } catch {
+    return false;
+  }
+}
+
 function getYtDlpPath(): string {
   const localPath = path.join(process.cwd(), 'yt-dlp');
   if (fs.existsSync(localPath)) {
@@ -48,11 +62,12 @@ function getYtDlpPath(): string {
 }
 
 // ==================== YT-DLP FUNCTIONS ====================
-// Add deno to PATH for yt-dlp JavaScript runtime
+// Add deno and common paths to PATH for yt-dlp JavaScript runtime and ffmpeg
 const DENO_PATH = `${process.env.HOME}/.deno/bin`;
+const EXTRA_PATHS = '/snap/bin:/usr/local/bin:/usr/bin';
 const ENV_WITH_DENO = {
   ...process.env,
-  PATH: `${DENO_PATH}:${process.env.PATH}`,
+  PATH: `${DENO_PATH}:${EXTRA_PATHS}:${process.env.PATH}`,
 };
 
 async function execYtDlp(args: string[]): Promise<string> {
@@ -75,14 +90,19 @@ async function execYtDlp(args: string[]): Promise<string> {
 }
 
 // ==================== QUALITY PRESETS ====================
+// Format selection for streaming (prefers formats with both video+audio to avoid merge)
+// Falls back to merge format when single-stream not available
 const QUALITY_PRESETS: Record<string, string> = {
-  'best': 'best',
-  '1080p': 'best[height<=1080][ext=mp4]/best[height<=1080]/best',
-  '720p': 'best[height<=720][ext=mp4]/best[height<=720]/best',
-  '480p': 'best[height<=480][ext=mp4]/best[height<=480]/best',
+  'best': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
+  '1080p': 'best[height<=1080][ext=mp4]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best',
+  '720p': 'best[height<=720][ext=mp4]/bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]/best',
+  '480p': 'best[height<=480][ext=mp4]/bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480]/best',
   '360p': 'best[height<=360][ext=mp4]/best[height<=360]/best',
   'audio': 'bestaudio[ext=m4a]/bestaudio',
 };
+
+// Ensure temp directory exists
+fs.ensureDirSync(CONFIG.TEMP_DIR);
 
 // ==================== APP ====================
 const app = new Elysia()
@@ -125,6 +145,58 @@ const app = new Elysia()
 
       console.log(`Getting video info: ${url}`);
 
+      // Handle Threads separately
+      if (isThreadsUrl(url)) {
+        // First try to extract embedded URL (Instagram, YouTube, etc.) - most common case
+        console.log('Checking Threads for embedded media...');
+        const embeddedUrl = await extractThreadsEmbeddedUrl(url);
+        if (embeddedUrl) {
+          // Check if it's a native Threads video
+          if (embeddedUrl.startsWith('NATIVE_VIDEO:')) {
+            const videoUrl = embeddedUrl.replace('NATIVE_VIDEO:', '');
+            console.log(`Found native Threads video`);
+            return {
+              title: 'Threads Video',
+              duration: 'Unknown',
+              uploader: 'Threads',
+              thumbnail: null,
+              source: 'threads_native',
+              originalUrl: videoUrl,
+            };
+          }
+
+          console.log(`Found embedded URL: ${embeddedUrl}`);
+          // Get info from embedded URL using yt-dlp
+          const output = await execYtDlp([
+            '--dump-json',
+            '--no-download',
+            '--no-warnings',
+            embeddedUrl
+          ]);
+          const info = JSON.parse(output);
+          const duration = info.duration
+            ? `${Math.floor(info.duration / 60)}:${String(Math.floor(info.duration % 60)).padStart(2, '0')}`
+            : 'Unknown';
+          return {
+            title: info.title || 'Unknown',
+            duration,
+            uploader: info.uploader || info.channel || 'Unknown',
+            thumbnail: info.thumbnail,
+            source: 'threads_embedded',
+            originalUrl: embeddedUrl,
+          };
+        }
+
+        // If no embedded URL, try to get direct video from Threads API
+        const threadsInfo = await getThreadsVideoInfo(url);
+        if (!('error' in threadsInfo)) {
+          return threadsInfo;
+        }
+
+        return { error: 'Khong tim thay video trong bai dang Threads' };
+      }
+
+      // Use yt-dlp for other platforms
       const output = await execYtDlp([
         '--dump-json',
         '--no-download',
@@ -157,10 +229,10 @@ const app = new Elysia()
     })
   })
 
-  // Stream download - stream video directly to client (no file storage on server)
+  // Stream download - download to temp file then stream to client
   .get('/download/stream', async ({ query }) => {
     try {
-      const url = query.url;
+      let url = query.url;
       const quality = query.quality ?? '720p';
 
       if (!url || !isValidUrl(url)) {
@@ -177,8 +249,90 @@ const app = new Elysia()
         });
       }
 
-      console.log(`Starting stream download: ${url}`);
+      console.log(`Starting download: ${url} (quality: ${quality})`);
 
+      // Handle Threads separately
+      if (isThreadsUrl(url)) {
+        // First try to extract embedded URL (Instagram, YouTube, etc.) - most common case
+        console.log('Checking Threads for embedded media...');
+        const embeddedUrl = await extractThreadsEmbeddedUrl(url);
+        if (embeddedUrl) {
+          // Check if it's a native Threads video
+          if (embeddedUrl.startsWith('NATIVE_VIDEO:')) {
+            const videoUrl = embeddedUrl.replace('NATIVE_VIDEO:', '');
+            console.log(`Downloading native Threads video...`);
+            const videoResponse = await axios.get(videoUrl, {
+              responseType: 'arraybuffer',
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              },
+              timeout: 60000,
+            });
+            return new Response(videoResponse.data, {
+              headers: {
+                'Content-Type': 'video/mp4',
+                'Content-Disposition': `attachment; filename="threads_video.mp4"`,
+                'Content-Length': videoResponse.data.length.toString(),
+              }
+            });
+          }
+
+          console.log(`Found embedded URL: ${embeddedUrl}, using yt-dlp...`);
+          // Use the embedded URL instead - let yt-dlp handle it below
+          url = embeddedUrl;
+        } else {
+          // If no embedded URL, try to get direct video from Threads API
+          const threadsResult = await getThreadsMedia(url);
+          if (threadsResult.success && threadsResult.data) {
+            const mediaData = threadsResult.data;
+            let videoUrl: string | undefined;
+
+            // Get video URL from result
+            if (mediaData.type === 'video' && mediaData.url) {
+              videoUrl = mediaData.url;
+            } else if (mediaData.type === 'videos' && mediaData.items && mediaData.items.length > 0) {
+              videoUrl = mediaData.items[0]!.url;
+            } else if (mediaData.type === 'photo' && mediaData.url) {
+              // Handle photo - redirect to image URL
+              const response = await axios.get(mediaData.url, { responseType: 'arraybuffer' });
+              const safeTitle = (mediaData.caption || 'threads_photo').replace(/[^a-zA-Z0-9_\-\s]/g, '_').substring(0, 50);
+              return new Response(response.data, {
+                headers: {
+                  'Content-Type': 'image/jpeg',
+                  'Content-Disposition': `attachment; filename="${safeTitle}.jpg"`,
+                }
+              });
+            }
+
+            if (videoUrl) {
+              // Download video from Threads
+              console.log(`Downloading Threads video: ${videoUrl}`);
+              const videoResponse = await axios.get(videoUrl, {
+                responseType: 'arraybuffer',
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                }
+              });
+
+              const safeTitle = (mediaData.caption || `threads_${mediaData.username}`).replace(/[^a-zA-Z0-9_\-\s]/g, '_').substring(0, 50);
+              return new Response(videoResponse.data, {
+                headers: {
+                  'Content-Type': 'video/mp4',
+                  'Content-Disposition': `attachment; filename="${safeTitle}.mp4"`,
+                  'Content-Length': videoResponse.data.length.toString(),
+                }
+              });
+            }
+          }
+
+          return new Response(JSON.stringify({ error: 'Khong tim thay video trong bai dang Threads' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
+      }
+
+      // Use yt-dlp for other platforms
       // Get video info first for filename
       const infoOutput = await execYtDlp([
         '--dump-json',
@@ -194,15 +348,22 @@ const app = new Elysia()
       const ext = quality === 'audio' ? 'm4a' : 'mp4';
       const downloadFilename = `${safeTitle}.${ext}`;
 
-      // Stream directly from yt-dlp to client (output to stdout)
+      // Create unique temp file path
+      const tempId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const tempFilePath = path.join(CONFIG.TEMP_DIR, `${tempId}.${ext}`);
+
+      // Download to temp file (allows merging video+audio)
       const ytDlpPath = getYtDlpPath();
       const args: string[] = [
         '-f', formatString,
-        '-o', '-', // Output to stdout
+        '-o', tempFilePath,
         '--no-warnings',
         '--no-playlist',
+        '--merge-output-format', ext,
         url
       ];
+
+      console.log(`Downloading to temp file: ${tempFilePath}`);
 
       const proc = Bun.spawn([ytDlpPath, ...args], {
         stdout: 'pipe',
@@ -210,21 +371,53 @@ const app = new Elysia()
         env: ENV_WITH_DENO,
       });
 
-      // Create a readable stream from yt-dlp stdout
-      const stream = proc.stdout;
+      const stderr = await new Response(proc.stderr).text();
+      const exitCode = await proc.exited;
+
+      if (exitCode !== 0) {
+        console.error('yt-dlp error:', stderr);
+        // Cleanup temp file if exists
+        if (fs.existsSync(tempFilePath)) {
+          fs.unlinkSync(tempFilePath);
+        }
+        return new Response(JSON.stringify({ error: 'Khong the tai video: ' + stderr.substring(0, 200) }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Check if file exists
+      if (!fs.existsSync(tempFilePath)) {
+        return new Response(JSON.stringify({ error: 'File khong duoc tao' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const fileStats = fs.statSync(tempFilePath);
+      console.log(`Download complete: ${tempFilePath} (${fileStats.size} bytes)`);
 
       const contentType = quality === 'audio' ? 'audio/mp4' : 'video/mp4';
 
-      return new Response(stream, {
+      // Read file and stream to client
+      const fileStream = fs.createReadStream(tempFilePath);
+
+      // Delete temp file after stream ends
+      fileStream.on('close', () => {
+        console.log(`Cleaning up temp file: ${tempFilePath}`);
+        fs.unlink(tempFilePath, () => { });
+      });
+
+      return new Response(fileStream as any, {
         headers: {
           'Content-Type': contentType,
           'Content-Disposition': `attachment; filename="${downloadFilename}"`,
-          'Transfer-Encoding': 'chunked',
+          'Content-Length': fileStats.size.toString(),
         }
       });
 
     } catch (error) {
-      console.error('Stream download error:', error);
+      console.error('Download error:', error);
       return new Response(JSON.stringify({ error: 'Khong the tai video' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' }
