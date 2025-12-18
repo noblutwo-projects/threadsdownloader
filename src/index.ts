@@ -139,9 +139,9 @@ const app = new Elysia()
         return { error: 'URL khong hop le' };
       }
 
-      if (!isSupportedPlatform(url)) {
-        return { error: 'Nen tang khong duoc ho tro' };
-      }
+      // if (!isSupportedPlatform(url)) {
+      //   return { error: 'Nen tang khong duoc ho tro' };
+      // }
 
       console.log(`Getting video info: ${url}`);
 
@@ -242,12 +242,12 @@ const app = new Elysia()
         });
       }
 
-      if (!isSupportedPlatform(url)) {
-        return new Response(JSON.stringify({ error: 'Nen tang khong duoc ho tro' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
+      // if (!isSupportedPlatform(url)) {
+      //   return new Response(JSON.stringify({ error: 'Nen tang khong duoc ho tro' }), {
+      //     status: 400,
+      //     headers: { 'Content-Type': 'application/json' }
+      //   });
+      // }
 
       console.log(`Starting download: ${url} (quality: ${quality})`);
 
