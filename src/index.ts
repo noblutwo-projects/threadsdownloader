@@ -1,19 +1,14 @@
 import { Elysia, t } from 'elysia';
-import fs from 'fs-extra';
 import path from 'path';
+import fs from 'fs-extra';
 import { swaggerPlugin } from './plugins';
 import { cors } from "@elysiajs/cors";
 
 const CONFIG = {
   PORT: parseInt(process.env.PORT || '3000'),
-  DEFAULT_QUALITY: process.env.DEFAULT_QUALITY || '720p',
 };
 
-let currentFolder: {
-  name: string;
-  updatedAt: Date;
-} | null = null;
-
+// ==================== HELPERS ====================
 function isValidUrl(string: string): boolean {
   try {
     const url = new URL(string);
@@ -85,17 +80,16 @@ const QUALITY_PRESETS: Record<string, string> = {
 const app = new Elysia()
   .use(cors())
   .use(swaggerPlugin)
+
   // API Info
   .get('/', () => {
     return {
       name: 'Video Downloader API',
       version: '1.0.0',
-      description: 'API de tai video tu cac nen tang nhu YouTube, Facebook, TikTok...',
+      description: 'API de tai video tu cac nen tang. Backend chi stream, khong luu file.',
       endpoints: {
-        'POST /video/info': 'Lay thong tin video',
-        'POST /download/stream': 'Tai video va stream truc tiep ve client',
-        'POST /config/folder': 'Luu thu muc download',
-        'GET /config/folder': 'Lay thu muc download hien tai',
+        'GET /video/info': 'Lay thong tin video',
+        'GET /download/stream': 'Stream video truc tiep ve client',
       },
       qualityOptions: ['best', '1080p', '720p', '480p', '360p', 'audio'],
       supportedPlatforms: SUPPORTED_PLATFORMS,
@@ -108,108 +102,58 @@ const app = new Elysia()
     }
   })
 
-  // ==================== CONFIG ENDPOINTS ====================
+  // Get video info
+  .get('/video/info', async ({ query }) => {
+    try {
+      const url = query.url;
 
-  // Lưu thư mục download
-  .post('/config/folder', ({ body }) => {
-    const { folderName } = body;
+      if (!url || !isValidUrl(url)) {
+        return { error: 'URL khong hop le' };
+      }
 
-    currentFolder = {
-      name: folderName,
-      updatedAt: new Date(),
-    };
+      if (!isSupportedPlatform(url)) {
+        return { error: 'Nen tang khong duoc ho tro' };
+      }
 
-    console.log(`Folder set to: ${folderName}`);
+      console.log(`Getting video info: ${url}`);
 
-    return {
-      success: true,
-      folderName,
-      message: `Thu muc luu file: ${folderName}`,
-    };
+      const output = await execYtDlp([
+        '--dump-json',
+        '--no-download',
+        '--no-warnings',
+        url
+      ]);
+
+      const info = JSON.parse(output);
+      const duration = info.duration
+        ? `${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}`
+        : 'Unknown';
+
+      return {
+        title: info.title || 'Unknown',
+        duration,
+        uploader: info.uploader || info.channel || 'Unknown',
+        thumbnail: info.thumbnail,
+      };
+    } catch (error) {
+      console.error('Get info error:', error);
+      return { error: 'Khong the lay thong tin video' };
+    }
   }, {
     detail: {
-      tags: ['Config'],
-      summary: 'Luu thu muc download',
+      tags: ['Video'],
+      summary: 'Lay thong tin video',
     },
-    body: t.Object({
-      folderName: t.String(),
+    query: t.Object({
+      url: t.String({ description: 'URL cua video' })
     })
   })
 
-  // Lấy thư mục hiện tại
-  .get('/config/folder', () => {
-    if (!currentFolder) {
-      return {
-        folderName: null,
-        message: 'Chua chon thu muc luu file',
-      };
-    }
-
-    return {
-      folderName: currentFolder.name,
-      updatedAt: currentFolder.updatedAt,
-    };
-  }, {
-    detail: {
-      tags: ['Config'],
-      summary: 'Lay thu muc download hien tai',
-    }
-  })
-
-  // ==================== VIDEO ENDPOINTS ====================
-
-  // Get video info
-  // .post('/video/info', async ({ body }) => {
-  //   try {
-  //     const { url } = body;
-
-  //     if (!url || !isValidUrl(url)) {
-  //       return { error: 'URL khong hop le' };
-  //     }
-
-  //     if (!isSupportedPlatform(url)) {
-  //       return { error: 'Nen tang khong duoc ho tro' };
-  //     }
-
-  //     console.log(`Getting video info: ${url}`);
-
-  //     const output = await execYtDlp([
-  //       '--dump-json',
-  //       '--no-download',
-  //       '--no-warnings',
-  //       url
-  //     ]);
-
-  //     const info = JSON.parse(output);
-  //     const duration = info.duration
-  //       ? `${Math.floor(info.duration / 60)}:${String(info.duration % 60).padStart(2, '0')}`
-  //       : 'Unknown';
-
-  //     return {
-  //       title: info.title || 'Unknown',
-  //       duration,
-  //       uploader: info.uploader || info.channel || 'Unknown',
-  //       thumbnail: info.thumbnail,
-  //     };
-  //   } catch (error) {
-  //     console.error('Get info error:', error);
-  //     return { error: 'Khong the lay thong tin video' };
-  //   }
-  // }, {
-  //   detail: {
-  //     tags: ['Video'],
-  //     summary: 'Lay thong tin video',
-  //   },
-  //   body: t.Object({
-  //     url: t.String()
-  //   })
-  // })
-
-  // Stream download - download video and stream directly to client
-  .post('/download/stream', async ({ body }) => {
+  // Stream download - stream video directly to client (no file storage on server)
+  .get('/download/stream', async ({ query }) => {
     try {
-      const { url, quality } = body;
-      const selectedQuality = quality ?? '720p';
+      const url = query.url;
+      const quality = query.quality ?? '720p';
 
       if (!url || !isValidUrl(url)) {
         return new Response(JSON.stringify({ error: 'URL khong hop le' }), {
@@ -236,24 +180,17 @@ const app = new Elysia()
       ]);
       const info = JSON.parse(infoOutput);
 
-      const formatString: string = QUALITY_PRESETS[selectedQuality] ?? QUALITY_PRESETS['720p'] ?? 'best[height<=720]/best';
-
-      // Create a temporary file to download to, then stream it
-      const tempDir = path.join(process.cwd(), '.temp');
-      await fs.ensureDir(tempDir);
+      const formatString: string = QUALITY_PRESETS[quality] ?? QUALITY_PRESETS['720p'] ?? 'best[height<=720]/best';
 
       const safeTitle = (info.title || 'video').replace(/[^a-zA-Z0-9_\-\s]/g, '_').substring(0, 100);
-      const ext = selectedQuality === 'audio' ? 'm4a' : 'mp4';
-      const tempFilename = `${Date.now()}_${safeTitle}.${ext}`;
-      const tempFilePath = path.join(tempDir, tempFilename);
+      const ext = quality === 'audio' ? 'm4a' : 'mp4';
+      const downloadFilename = `${safeTitle}.${ext}`;
 
-      // Download to temp file
+      // Stream directly from yt-dlp to client (output to stdout)
       const ytDlpPath = getYtDlpPath();
       const args: string[] = [
         '-f', formatString,
-        '-o', tempFilePath,
-        '--restrict-filenames',
-        '--concurrent-fragments', '8',
+        '-o', '-', // Output to stdout
         '--no-warnings',
         '--no-playlist',
         url
@@ -264,43 +201,18 @@ const app = new Elysia()
         stderr: 'pipe',
       });
 
-      await proc.exited;
+      // Create a readable stream from yt-dlp stdout
+      const stream = proc.stdout;
 
-      // Check if file exists
-      if (!(await fs.pathExists(tempFilePath))) {
-        return new Response(JSON.stringify({ error: 'Khong the tai video' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
+      const contentType = quality === 'audio' ? 'audio/mp4' : 'video/mp4';
 
-      // Get file stats
-      const stats = await fs.stat(tempFilePath);
-      const file = Bun.file(tempFilePath);
-
-      // Create filename for download
-      const downloadFilename = `${safeTitle}.${ext}`;
-
-      // Stream the file to client
-      const response = new Response(file, {
+      return new Response(stream, {
         headers: {
-          'Content-Type': file.type || 'application/octet-stream',
-          'Content-Length': stats.size.toString(),
+          'Content-Type': contentType,
           'Content-Disposition': `attachment; filename="${downloadFilename}"`,
+          'Transfer-Encoding': 'chunked',
         }
       });
-
-      // Clean up temp file after response is sent (delayed)
-      setTimeout(async () => {
-        try {
-          await fs.remove(tempFilePath);
-          console.log(`Cleaned up temp file: ${tempFilename}`);
-        } catch (e) {
-          console.error('Error cleaning up temp file:', e);
-        }
-      }, 60000); // Delete after 1 minute
-
-      return response;
 
     } catch (error) {
       console.error('Stream download error:', error);
@@ -312,16 +224,16 @@ const app = new Elysia()
   }, {
     detail: {
       tags: ['Download'],
-      summary: 'Tai video va stream truc tiep ve client',
-      description: 'Tai video va stream truc tiep ve client. Frontend se nhan stream va luu file vao thu muc user chon.',
+      summary: 'Stream video truc tiep ve client',
+      description: 'Stream video tu URL. Backend KHONG luu file, chi pipe truc tiep ve client. Frontend se nhan stream va luu vao may user.',
     },
-    body: t.Object({
-      url: t.String(),
-      quality: t.Optional(t.String())
+    query: t.Object({
+      url: t.String({ description: 'URL cua video can tai' }),
+      quality: t.Optional(t.String({ description: 'Chat luong video: best, 1080p, 720p, 480p, 360p, audio' }))
     })
   })
 
   .listen(CONFIG.PORT);
 
-console.log(`🚀 Video Downloader API is running on http://localhost:${CONFIG.PORT}`);
-console.log(`📚 Swagger UI available at http://localhost:${CONFIG.PORT}/swagger`);
+console.log(`Video Downloader API is running on http://localhost:${CONFIG.PORT}`);
+console.log(`Swagger UI available at http://localhost:${CONFIG.PORT}/swagger`);
