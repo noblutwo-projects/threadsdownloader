@@ -1,4 +1,4 @@
-name: Deploy SSH Tunnel v2
+name: Deploy via Cloudflare Tunnel
 
 on:
   push:
@@ -19,39 +19,28 @@ jobs:
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
 
-      - name: Setup SSH
+      - name: Setup SSH with Cloudflare Tunnel
         env:
-          SSH_KEY_BASE64: ${{ secrets.SSH_KEY_BASE64 }}
-          TUNNEL_HOST: ${{ secrets.CF_TUNNEL_HOSTNAME }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          CF_TUNNEL_HOSTNAME: ${{ secrets.CF_TUNNEL_HOSTNAME }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY_BASE64" | base64 -d > ~/.ssh/id_rsa
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          echo "Host $TUNNEL_HOST" > ~/.ssh/config
-          echo "  ProxyCommand cloudflared access ssh --hostname %h" >> ~/.ssh/config
-          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
-          echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
-          echo "  IdentityFile ~/.ssh/id_rsa" >> ~/.ssh/config
+          cat > ~/.ssh/config << EOF
+          Host $CF_TUNNEL_HOSTNAME
+            ProxyCommand cloudflared access ssh --hostname %h
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+            IdentityFile ~/.ssh/id_rsa
+          EOF
           chmod 600 ~/.ssh/config
-          echo "=== SSH Config ==="
           cat ~/.ssh/config
-          echo "=== Key Check ==="
-          ssh-keygen -lf ~/.ssh/id_rsa || echo "Key invalid"
-          echo "=== Key Header ==="
-          head -1 ~/.ssh/id_rsa
+          ssh-keygen -lf ~/.ssh/id_rsa || echo "Key validation failed"
 
-      - name: Deploy
+      - name: Deploy via Cloudflare Tunnel
         env:
-          USER: ${{ secrets.VM_USERNAME }}
-          HOST: ${{ secrets.CF_TUNNEL_HOSTNAME }}
+          VM_USERNAME: ${{ secrets.VM_USERNAME }}
+          CF_TUNNEL_HOSTNAME: ${{ secrets.CF_TUNNEL_HOSTNAME }}
         run: |
-          ssh "$USER@$HOST" << 'ENDSSH'
-            cd ~/threadsdownloader
-            echo "=== Git Stash ==="
-            git stash
-            echo "=== Git Pull ==="
-            git pull origin master
-            echo "=== Git Stash Pop ==="
-            git stash pop || true
-            echo "=== Deployment completed at $(date) ==="
-          ENDSSH
+          ssh -v "$VM_USERNAME@$CF_TUNNEL_HOSTNAME" "cd ~/threadsdownloader && git stash && git pull origin master && git stash pop || true && echo 'Deployment completed at \$(date)'"
