@@ -25,9 +25,9 @@ export async function extractThreadsEmbeddedUrl(url: string): Promise<string | n
       const decodedUrl = decodeURIComponent(fbRedirectMatch[1]);
       // Check if it's a supported platform
       if (decodedUrl.includes('instagram.com') ||
-          decodedUrl.includes('youtube.com') ||
-          decodedUrl.includes('youtu.be') ||
-          decodedUrl.includes('tiktok.com')) {
+        decodedUrl.includes('youtube.com') ||
+        decodedUrl.includes('youtu.be') ||
+        decodedUrl.includes('tiktok.com')) {
         return decodedUrl;
       }
     }
@@ -71,7 +71,7 @@ export async function extractThreadsEmbeddedUrl(url: string): Promise<string | n
 // Convert shortcode to post ID
 function getPostId(url: string): string | null {
   try {
-    url = url.split('?')[0].replace(/\/+$/, '');
+    url = url.split('?')[0]!.replace(/\/+$/, '');
     const shortcode = url.split('/').pop();
     if (!shortcode) return null;
 
