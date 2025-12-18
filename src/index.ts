@@ -48,11 +48,19 @@ function getYtDlpPath(): string {
 }
 
 // ==================== YT-DLP FUNCTIONS ====================
+// Add deno to PATH for yt-dlp JavaScript runtime
+const DENO_PATH = `${process.env.HOME}/.deno/bin`;
+const ENV_WITH_DENO = {
+  ...process.env,
+  PATH: `${DENO_PATH}:${process.env.PATH}`,
+};
+
 async function execYtDlp(args: string[]): Promise<string> {
   const ytDlpPath = getYtDlpPath();
   const proc = Bun.spawn([ytDlpPath, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
+    env: ENV_WITH_DENO,
   });
 
   const stdout = await new Response(proc.stdout).text();
@@ -199,6 +207,7 @@ const app = new Elysia()
       const proc = Bun.spawn([ytDlpPath, ...args], {
         stdout: 'pipe',
         stderr: 'pipe',
+        env: ENV_WITH_DENO,
       });
 
       // Create a readable stream from yt-dlp stdout
