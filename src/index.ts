@@ -61,6 +61,26 @@ function getYtDlpPath(): string {
   return 'yt-dlp';
 }
 
+// Wrap CDN thumbnail URLs with proxy endpoint
+function proxyThumbnailUrl(thumbnailUrl: string | null | undefined): string | null {
+  if (!thumbnailUrl) return null;
+
+  // Check if it's from Instagram/Facebook CDN (needs proxying)
+  const cdnDomains = ['instagram.com', 'cdninstagram.com', 'fbcdn.net', 'threads.net'];
+  try {
+    const urlObj = new URL(thumbnailUrl);
+    const needsProxy = cdnDomains.some(domain => urlObj.hostname.includes(domain));
+
+    if (needsProxy) {
+      return `/api/image?url=${encodeURIComponent(thumbnailUrl)}`;
+    }
+  } catch {
+    // Invalid URL, return as-is
+  }
+
+  return thumbnailUrl;
+}
+
 // ==================== YT-DLP FUNCTIONS ====================
 // Add deno and common paths to PATH for yt-dlp JavaScript runtime and ffmpeg
 const DENO_PATH = `${process.env.HOME}/.deno/bin`;
@@ -89,9 +109,6 @@ async function execYtDlp(args: string[]): Promise<string> {
   return stdout;
 }
 
-// ==================== QUALITY PRESETS ====================
-// Format selection for streaming (prefers formats with both video+audio to avoid merge)
-// Falls back to merge format when single-stream not available
 const QUALITY_PRESETS: Record<string, string> = {
   'best': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best',
   '1080p': 'best[height<=1080][ext=mp4]/bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080]/best',
@@ -101,15 +118,11 @@ const QUALITY_PRESETS: Record<string, string> = {
   'audio': 'bestaudio[ext=m4a]/bestaudio',
 };
 
-// Ensure temp directory exists
 fs.ensureDirSync(CONFIG.TEMP_DIR);
 
-// ==================== APP ====================
 const app = new Elysia()
   .use(cors())
   .use(swaggerPlugin)
-
-  // API Info
   .get('/', () => {
     return {
       name: 'Video Downloader API',
@@ -130,7 +143,76 @@ const app = new Elysia()
     }
   })
 
-  // Get video info
+  // ==================== IMAGE PROXY ====================
+  .get('/api/image', async ({ query }) => {
+    try {
+      const imageUrl = query.url;
+
+      if (!imageUrl || !isValidUrl(imageUrl)) {
+        return new Response(JSON.stringify({ error: 'URL khong hop le' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Only allow proxying from known CDN domains
+      const allowedDomains = [
+        'instagram.com',
+        'cdninstagram.com',
+        'fbcdn.net',
+        'threads.net',
+      ];
+
+      const urlObj = new URL(imageUrl);
+      const isAllowed = allowedDomains.some(domain => urlObj.hostname.includes(domain));
+
+      if (!isAllowed) {
+        return new Response(JSON.stringify({ error: 'Domain khong duoc phep' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const response = await axios.get(imageUrl, {
+        responseType: 'arraybuffer',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+          'Referer': 'https://www.instagram.com/',
+        },
+        timeout: 15000,
+      });
+
+      // Detect content type from response or URL
+      let contentType = response.headers['content-type'] || 'image/jpeg';
+      if (imageUrl.includes('.webp')) contentType = 'image/webp';
+      else if (imageUrl.includes('.png')) contentType = 'image/png';
+
+      return new Response(response.data, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=86400', // Cache 24h
+          'Access-Control-Allow-Origin': '*',
+        }
+      });
+    } catch (error) {
+      console.error('Image proxy error:', error);
+      return new Response(JSON.stringify({ error: 'Khong the tai anh' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+  }, {
+    detail: {
+      tags: ['Proxy'],
+      summary: 'Proxy anh tu Instagram/Threads CDN',
+      description: 'Proxy anh de tranh CORS va hotlink blocking tu Instagram CDN',
+    },
+    query: t.Object({
+      url: t.String({ description: 'URL anh goc tu Instagram CDN' })
+    })
+  })
+
   .get('/video/info', async ({ query }) => {
     try {
       const url = query.url;
@@ -138,20 +220,11 @@ const app = new Elysia()
       if (!url || !isValidUrl(url)) {
         return { error: 'URL khong hop le' };
       }
-
-      // if (!isSupportedPlatform(url)) {
-      //   return { error: 'Nen tang khong duoc ho tro' };
-      // }
-
       console.log(`Getting video info: ${url}`);
-
-      // Handle Threads separately
       if (isThreadsUrl(url)) {
-        // First try to extract embedded URL (Instagram, YouTube, etc.) - most common case
         console.log('Checking Threads for embedded media...');
         const embeddedUrl = await extractThreadsEmbeddedUrl(url);
         if (embeddedUrl) {
-          // Check if it's a native Threads video
           if (embeddedUrl.startsWith('NATIVE_VIDEO:')) {
             const videoUrl = embeddedUrl.replace('NATIVE_VIDEO:', '');
             console.log(`Found native Threads video`);
@@ -166,7 +239,6 @@ const app = new Elysia()
           }
 
           console.log(`Found embedded URL: ${embeddedUrl}`);
-          // Get info from embedded URL using yt-dlp
           const output = await execYtDlp([
             '--dump-json',
             '--no-download',
@@ -181,22 +253,23 @@ const app = new Elysia()
             title: info.title || 'Unknown',
             duration,
             uploader: info.uploader || info.channel || 'Unknown',
-            thumbnail: info.thumbnail,
+            thumbnail: proxyThumbnailUrl(info.thumbnail),
             source: 'threads_embedded',
             originalUrl: embeddedUrl,
           };
         }
 
-        // If no embedded URL, try to get direct video from Threads API
         const threadsInfo = await getThreadsVideoInfo(url);
         if (!('error' in threadsInfo)) {
-          return threadsInfo;
+          return {
+            ...threadsInfo,
+            thumbnail: proxyThumbnailUrl(threadsInfo.thumbnail),
+          };
         }
 
         return { error: 'Khong tim thay video trong bai dang Threads' };
       }
 
-      // Use yt-dlp for other platforms
       const output = await execYtDlp([
         '--dump-json',
         '--no-download',
@@ -213,7 +286,7 @@ const app = new Elysia()
         title: info.title || 'Unknown',
         duration,
         uploader: info.uploader || info.channel || 'Unknown',
-        thumbnail: info.thumbnail,
+        thumbnail: proxyThumbnailUrl(info.thumbnail),
       };
     } catch (error) {
       console.error('Get info error:', error);
@@ -228,36 +301,20 @@ const app = new Elysia()
       url: t.String({ description: 'URL cua video' })
     })
   })
-
-  // Stream download - download to temp file then stream to client
   .get('/download/stream', async ({ query }) => {
     try {
       let url = query.url;
       const quality = query.quality ?? '720p';
-
       if (!url || !isValidUrl(url)) {
         return new Response(JSON.stringify({ error: 'URL khong hop le' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
       }
-
-      // if (!isSupportedPlatform(url)) {
-      //   return new Response(JSON.stringify({ error: 'Nen tang khong duoc ho tro' }), {
-      //     status: 400,
-      //     headers: { 'Content-Type': 'application/json' }
-      //   });
-      // }
-
-      console.log(`Starting download: ${url} (quality: ${quality})`);
-
-      // Handle Threads separately
       if (isThreadsUrl(url)) {
-        // First try to extract embedded URL (Instagram, YouTube, etc.) - most common case
         console.log('Checking Threads for embedded media...');
         const embeddedUrl = await extractThreadsEmbeddedUrl(url);
         if (embeddedUrl) {
-          // Check if it's a native Threads video
           if (embeddedUrl.startsWith('NATIVE_VIDEO:')) {
             const videoUrl = embeddedUrl.replace('NATIVE_VIDEO:', '');
             console.log(`Downloading native Threads video...`);
@@ -276,24 +333,18 @@ const app = new Elysia()
               }
             });
           }
-
           console.log(`Found embedded URL: ${embeddedUrl}, using yt-dlp...`);
-          // Use the embedded URL instead - let yt-dlp handle it below
           url = embeddedUrl;
         } else {
-          // If no embedded URL, try to get direct video from Threads API
           const threadsResult = await getThreadsMedia(url);
           if (threadsResult.success && threadsResult.data) {
             const mediaData = threadsResult.data;
             let videoUrl: string | undefined;
-
-            // Get video URL from result
             if (mediaData.type === 'video' && mediaData.url) {
               videoUrl = mediaData.url;
             } else if (mediaData.type === 'videos' && mediaData.items && mediaData.items.length > 0) {
               videoUrl = mediaData.items[0]!.url;
             } else if (mediaData.type === 'photo' && mediaData.url) {
-              // Handle photo - redirect to image URL
               const response = await axios.get(mediaData.url, { responseType: 'arraybuffer' });
               const safeTitle = (mediaData.caption || 'threads_photo').replace(/[^a-zA-Z0-9_\-\s]/g, '_').substring(0, 50);
               return new Response(response.data, {
@@ -305,7 +356,6 @@ const app = new Elysia()
             }
 
             if (videoUrl) {
-              // Download video from Threads
               console.log(`Downloading Threads video: ${videoUrl}`);
               const videoResponse = await axios.get(videoUrl, {
                 responseType: 'arraybuffer',
@@ -332,8 +382,6 @@ const app = new Elysia()
         }
       }
 
-      // Use yt-dlp for other platforms
-      // Get video info first for filename
       const infoOutput = await execYtDlp([
         '--dump-json',
         '--no-download',
@@ -348,11 +396,9 @@ const app = new Elysia()
       const ext = quality === 'audio' ? 'm4a' : 'mp4';
       const downloadFilename = `${safeTitle}.${ext}`;
 
-      // Create unique temp file path
       const tempId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
       const tempFilePath = path.join(CONFIG.TEMP_DIR, `${tempId}.${ext}`);
 
-      // Download to temp file (allows merging video+audio)
       const ytDlpPath = getYtDlpPath();
       const args: string[] = [
         '-f', formatString,
@@ -376,7 +422,6 @@ const app = new Elysia()
 
       if (exitCode !== 0) {
         console.error('yt-dlp error:', stderr);
-        // Cleanup temp file if exists
         if (fs.existsSync(tempFilePath)) {
           fs.unlinkSync(tempFilePath);
         }
@@ -386,7 +431,6 @@ const app = new Elysia()
         });
       }
 
-      // Check if file exists
       if (!fs.existsSync(tempFilePath)) {
         return new Response(JSON.stringify({ error: 'File khong duoc tao' }), {
           status: 500,
@@ -399,10 +443,8 @@ const app = new Elysia()
 
       const contentType = quality === 'audio' ? 'audio/mp4' : 'video/mp4';
 
-      // Read file and stream to client
       const fileStream = fs.createReadStream(tempFilePath);
 
-      // Delete temp file after stream ends
       fileStream.on('close', () => {
         console.log(`Cleaning up temp file: ${tempFilePath}`);
         fs.unlink(tempFilePath, () => { });
